@@ -5,36 +5,44 @@ This file is automatically loaded by pytest and provides
 fixtures that can be used across all test modules.
 """
 
+from typing import Any, Dict, Iterator, List
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app.model import MovieRatingModel
 
-
 # =============================================================================
 # API Client Fixtures
 # =============================================================================
 
+
 @pytest.fixture(scope="session")
-def test_client():
+def test_client() -> Iterator[TestClient]:
     """
     Create a test client for API tests.
-    
+
     Scope: session - created once for all tests
+
+    The client is used as a context manager so FastAPI runs the lifespan
+    handler (which loads the model). A bare ``TestClient(app)`` skips it,
+    the global model stays None and every prediction returns 503.
     """
-    return TestClient(app)
+    with TestClient(app) as client:
+        yield client
 
 
 # =============================================================================
 # Model Fixtures
 # =============================================================================
 
+
 @pytest.fixture(scope="session")
-def trained_model():
+def trained_model() -> MovieRatingModel:
     """
     Load model once for all tests.
-    
+
     Scope: session - model is loaded once and reused
     """
     try:
@@ -47,14 +55,15 @@ def trained_model():
 # Sample Data Fixtures
 # =============================================================================
 
+
 @pytest.fixture
-def sample_prediction_request():
+def sample_prediction_request() -> Dict[str, str]:
     """Sample valid prediction request."""
     return {"user_id": "196", "movie_id": "242"}
 
 
 @pytest.fixture
-def sample_batch_request():
+def sample_batch_request() -> Dict[str, List[Dict[str, str]]]:
     """Sample batch prediction request."""
     return {
         "predictions": [
@@ -66,7 +75,7 @@ def sample_batch_request():
 
 
 @pytest.fixture
-def sample_ratings():
+def sample_ratings() -> List[Dict[str, Any]]:
     """Sample ratings data for data quality tests."""
     return [
         {"user_id": "1", "movie_id": "10", "rating": 4.0},
@@ -80,7 +89,7 @@ def sample_ratings():
 
 
 @pytest.fixture
-def invalid_prediction_requests():
+def invalid_prediction_requests() -> List[Dict[str, str]]:
     """Collection of invalid prediction requests for testing validation."""
     return [
         {},  # Empty
@@ -89,6 +98,7 @@ def invalid_prediction_requests():
         {"user_id": "", "movie_id": "242"},  # Empty user_id
         {"user_id": "196", "movie_id": ""},  # Empty movie_id
         {"user_id": "   ", "movie_id": "242"},  # Whitespace user_id
+        {"user_id": "1" * 10_000, "movie_id": "242"},  # Oversized user_id
     ]
 
 
@@ -96,8 +106,9 @@ def invalid_prediction_requests():
 # Known Test Cases Fixtures
 # =============================================================================
 
+
 @pytest.fixture
-def known_user_movie_pairs():
+def known_user_movie_pairs() -> List[Dict[str, Any]]:
     """
     Known user-movie pairs from MovieLens 100K dataset.
     These are actual ratings that exist in the training data.
@@ -112,12 +123,12 @@ def known_user_movie_pairs():
 
 
 @pytest.fixture
-def unknown_users():
+def unknown_users() -> List[str]:
     """User IDs that are unlikely to exist in the dataset."""
     return ["99999", "999999", "0", "-1", "new_user"]
 
 
 @pytest.fixture
-def unknown_movies():
+def unknown_movies() -> List[str]:
     """Movie IDs that are unlikely to exist in the dataset."""
     return ["99999", "999999", "0", "-1", "new_movie"]
