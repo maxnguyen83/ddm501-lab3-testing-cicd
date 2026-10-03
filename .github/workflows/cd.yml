@@ -1,0 +1,98 @@
+# =============================================================================
+# CD Pipeline for Movie Rating API
+# DDM501 - Lab 3: Testing & CI/CD
+#
+# TODO: Complete this workflow configuration (BONUS)
+# =============================================================================
+
+name: CD Pipeline
+
+# =============================================================================
+# TODO 1: Configure Triggers
+# =============================================================================
+# This workflow should run when:
+# - A version tag is pushed (e.g., v1.0.0, v1.2.3)
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  # ===========================================================================
+  # TODO 2: Build and Push Docker Image
+  # ===========================================================================
+  build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      # TODO 3: Set up Docker Buildx
+      # - name: Set up Docker Buildx
+      #   uses: docker/setup-buildx-action@v3
+      
+      # TODO 4: Login to Docker Hub
+      # - name: Login to Docker Hub
+      #   uses: docker/login-action@v3
+      #   with:
+      #     username: ${{ secrets.DOCKER_USERNAME }}
+      #     password: ${{ secrets.DOCKER_PASSWORD }}
+      
+      # TODO 5: Build and push Docker image
+      # - name: Build and push
+      #   uses: docker/build-push-action@v5
+      #   with:
+      #     context: .
+      #     push: true
+      #     tags: |
+      #       ${{ secrets.DOCKER_USERNAME }}/movie-rating-api:latest
+      #       ${{ secrets.DOCKER_USERNAME }}/movie-rating-api:${{ github.ref_name }}
+      
+      # TODO 6: Create GitHub Release (BONUS)
+      # - name: Create Release
+      #   uses: softprops/action-gh-release@v1
+      #   with:
+      #     tag_name: ${{ github.ref_name }}
+      #     name: Release ${{ github.ref_name }}
+      #     body: |
+      #       Automated release for version ${{ github.ref_name }}
+      #     draft: false
+      #     prerelease: false
+
+  # ===========================================================================
+  # TODO 7: Deploy to Staging (BONUS)
+  # ===========================================================================
+  # This job would deploy to a staging environment
+  # In a real scenario, this might deploy to AWS, GCP, Azure, etc.
+  
+  # deploy-staging:
+  #   name: Deploy to Staging
+  #   runs-on: ubuntu-latest
+  #   needs: [build-and-push]
+  #   environment: staging
+  #   
+  #   steps:
+  #     - name: Deploy to staging
+  #       run: |
+  #         echo "Deploying to staging environment..."
+  #         # Add deployment commands here
+
+  # ===========================================================================
+  # TODO 8: Deploy to Production (BONUS)
+  # ===========================================================================
+  # This job would deploy to production after staging approval
+  
+  # deploy-production:
+  #   name: Deploy to Production
+  #   runs-on: ubuntu-latest
+  #   needs: [deploy-staging]
+  #   environment: production
+  #   
+  #   steps:
+  #     - name: Deploy to production
+  #       run: |
+  #         echo "Deploying to production environment..."
+  #         # Add deployment commands here

@@ -1,0 +1,157 @@
+# =============================================================================
+# CI Pipeline for Movie Rating API
+# DDM501 - Lab 3: Testing & CI/CD
+#
+# TODO: Complete this workflow configuration
+# =============================================================================
+
+name: CI Pipeline
+
+# =============================================================================
+# TODO 1: Configure Triggers
+# =============================================================================
+# Requirements:
+# - Run on push to main and develop branches
+# - Run on pull requests to main branch
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ===========================================================================
+  # Linting Job
+  # ===========================================================================
+  lint:
+    name: Lint Code
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      
+      # TODO 2: Add dependency caching
+      # - name: Cache pip dependencies
+      #   uses: actions/cache@v3
+      #   with:
+      #     path: ~/.cache/pip
+      #     key: ${{ runner.os }}-pip-${{ hashFiles('requirements*.txt') }}
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 black isort
+      
+      # TODO 3: Add linting steps
+      # - name: Run flake8
+      #   run: flake8 app/ tests/ --max-line-length=100 --exclude=__pycache__
+      
+      # - name: Check black formatting
+      #   run: black --check app/ tests/
+      
+      # - name: Check import sorting
+      #   run: isort --check-only app/ tests/
+
+  # ===========================================================================
+  # Type Checking Job
+  # ===========================================================================
+  type-check:
+    name: Type Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install mypy types-requests
+      
+      # TODO 4: Add type checking step
+      # - name: Run mypy
+      #   run: mypy app/ --ignore-missing-imports
+
+  # ===========================================================================
+  # TODO 5: Test Job
+  # ===========================================================================
+  # Requirements:
+  # - Run pytest with coverage
+  # - Train model before running tests
+  # - Upload coverage report
+  
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    # TODO: Add needs: [lint] to run after linting
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      
+      # TODO: Add pip caching
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+      
+      # TODO 6: Train model step
+      # - name: Train model
+      #   run: python scripts/train_model.py
+      
+      # TODO 7: Run tests with coverage
+      # - name: Run tests
+      #   run: pytest tests/ -v --cov=app --cov-report=xml --cov-report=html
+      
+      # TODO 8: Upload coverage report (BONUS)
+      # - name: Upload coverage to Codecov
+      #   uses: codecov/codecov-action@v3
+      #   with:
+      #     file: ./coverage.xml
+      #     fail_ci_if_error: false
+
+  # ===========================================================================
+  # TODO 9: Build Job (BONUS)
+  # ===========================================================================
+  # Requirements:
+  # - Build Docker image
+  # - Verify image builds successfully
+  
+  # build:
+  #   name: Build Docker Image
+  #   runs-on: ubuntu-latest
+  #   needs: [test]
+  #   
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+  #     
+  #     - name: Build Docker image
+  #       run: docker build -t movie-rating-api:test .
+  #     
+  #     - name: Test Docker image
+  #       run: |
+  #         docker run -d -p 8000:8000 --name test-api movie-rating-api:test
+  #         sleep 10
+  #         curl http://localhost:8000/health
+  #         docker stop test-api
