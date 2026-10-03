@@ -1,0 +1,17 @@
+# Keep the build context small: only app/, scripts/, models/ and
+# requirements.txt are copied into the image.
+.git
+.github
+.venv
+venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.mypy_cache
+htmlcov
+coverage.xml
+.coverage
+reports
+tests
+docs
+*.md
