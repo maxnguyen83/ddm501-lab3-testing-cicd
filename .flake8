@@ -1,0 +1,8 @@
+# flake8 does not read pyproject.toml, so its settings live here.
+# Shared by local runs, pre-commit and CI.
+[flake8]
+max-line-length = 100
+# E203/W503 conflict with black's formatting
+extend-ignore = E203, W503
+max-complexity = 10
+exclude = .git, __pycache__, .venv, venv, build, dist, .mypy_cache, .pytest_cache, htmlcov
