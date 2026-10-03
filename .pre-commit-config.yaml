@@ -2,15 +2,20 @@
 # Pre-commit hooks configuration
 # DDM501 - Lab 3: Testing & CI/CD
 #
-# TODO: Complete this configuration
-#
-# Setup:
-#   pip install pre-commit
+# Setup (installs both the pre-commit and the pre-push hook):
+#   pip install -r requirements-dev.txt
 #   pre-commit install
 #
 # Run manually:
-#   pre-commit run --all-files
+#   pre-commit run --all-files                      # commit-stage hooks
+#   pre-commit run --all-files --hook-stage pre-push  # unit tests
+#
+# Tool versions match requirements-dev.txt so local hooks and CI agree.
+# Settings come from pyproject.toml (black, isort, mypy) and .flake8.
 # =============================================================================
+
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
 
 repos:
   # ===========================================================================
@@ -23,60 +28,63 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-json
+      - id: check-toml
       - id: check-added-large-files
         args: ['--maxkb=1000']
       - id: check-merge-conflict
+      - id: debug-statements
       - id: detect-private-key
 
   # ===========================================================================
-  # TODO 1: Add Black formatter
+  # Black formatter
   # ===========================================================================
-  # - repo: https://github.com/psf/black
-  #   rev: 23.12.1
-  #   hooks:
-  #     - id: black
-  #       language_version: python3.10
-  #       args: ['--line-length=100']
+  # No language_version pin: pinning python3.10 breaks on machines that only
+  # have 3.12. Black's target version is set in pyproject.toml instead.
+  - repo: https://github.com/psf/black
+    rev: 23.12.1
+    hooks:
+      - id: black
 
   # ===========================================================================
-  # TODO 2: Add isort for import sorting
+  # isort for import sorting (profile=black, line_length=100 in pyproject)
   # ===========================================================================
-  # - repo: https://github.com/pycqa/isort
-  #   rev: 5.13.2
-  #   hooks:
-  #     - id: isort
-  #       args: ['--profile=black', '--line-length=100']
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
 
   # ===========================================================================
-  # TODO 3: Add Flake8 linter
+  # Flake8 linter (settings in .flake8)
   # ===========================================================================
-  # - repo: https://github.com/pycqa/flake8
-  #   rev: 7.0.0
-  #   hooks:
-  #     - id: flake8
-  #       args: ['--max-line-length=100', '--exclude=__pycache__,venv']
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
 
   # ===========================================================================
-  # TODO 4: Add mypy type checker (BONUS)
+  # mypy type checker (app/ and scripts/, same scope as CI)
   # ===========================================================================
-  # - repo: https://github.com/pre-commit/mirrors-mypy
-  #   rev: v1.8.0
-  #   hooks:
-  #     - id: mypy
-  #       additional_dependencies:
-  #         - types-requests
-  #         - pydantic
-  #       args: ['--ignore-missing-imports']
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.8.0
+    hooks:
+      - id: mypy
+        files: ^(app|scripts)/
+        additional_dependencies:
+          - pydantic==2.5.2
+          - fastapi==0.104.1
+          - numpy==1.26.2
+          - types-requests
 
   # ===========================================================================
-  # TODO 5: Add pytest hook (BONUS)
+  # pytest unit tests on push (too slow for every commit)
   # ===========================================================================
-  # This runs tests before every commit (can be slow)
-  # - repo: local
-  #   hooks:
-  #     - id: pytest
-  #       name: pytest
-  #       entry: pytest tests/unit/ -v --tb=short
-  #       language: system
-  #       pass_filenames: false
-  #       always_run: true
+  # Runs in the active virtualenv (language: system), so activate .venv first.
+  - repo: local
+    hooks:
+      - id: pytest-unit
+        name: pytest (unit tests)
+        entry: python -m pytest tests/unit/ -q --no-cov -p no:cacheprovider
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
