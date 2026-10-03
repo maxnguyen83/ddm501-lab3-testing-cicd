@@ -5,6 +5,7 @@ __pycache__/
 *.so
 .Python
 venv/
+.venv/
 env/
 .env
 
@@ -25,16 +26,18 @@ build/
 htmlcov/
 coverage.xml
 *.cover
+reports/
 
 # Type checking
 .mypy_cache/
 
-# Models (large files)
+# Models (large files) and generated training metrics
 models/*.pkl
+models/*.json
 !models/.gitkeep
 
-# Data
-data/
+# Data (root only: a bare "data/" also matched tests/data/ and hid the data tests)
+/data/
 *.csv
 
 # Logs
