@@ -2,97 +2,238 @@
 # CD Pipeline for Movie Rating API
 # DDM501 - Lab 3: Testing & CI/CD
 #
-# TODO: Complete this workflow configuration (BONUS)
+# Trigger: pushing a version tag, e.g.
+#   git tag v1.0.0 && git push origin v1.0.0
+#
+# verify ──> build-and-push (GHCR) ──┬─> smoke-test-published (staging check)
+#                                     └─> release (GitHub Release notes)
+#
+# Registry choice: GitHub Container Registry (ghcr.io) with the built-in
+# GITHUB_TOKEN, instead of Docker Hub. No extra repository secrets are needed,
+# the image is linked to this repository, and access follows repo permissions.
+#
+# Rollback: every release is an immutable tag (ghcr.io/<owner>/<repo>:1.2.3).
+# Rolling back = deploying the previous version tag again.
 # =============================================================================
 
 name: CD Pipeline
-
-# =============================================================================
-# TODO 1: Configure Triggers
-# =============================================================================
-# This workflow should run when:
-# - A version tag is pushed (e.g., v1.0.0, v1.2.3)
 
 on:
   push:
     tags:
       - 'v*'
 
+# Never run two releases for the same tag at once
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
 jobs:
   # ===========================================================================
-  # TODO 2: Build and Push Docker Image
+  # Quality gate: the tagged commit must pass tests and model validation again
+  # ===========================================================================
+  verify:
+    name: Test and Validate Model
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Cache MovieLens 100K
+        uses: actions/cache@v4
+        with:
+          path: ~/.surprise_data
+          key: movielens-100k-v1
+
+      - name: Train model
+        run: python scripts/train_model.py
+
+      - name: Run tests with coverage gate
+        run: pytest tests/ --cov=app --cov-report=term-missing --cov-fail-under=80
+
+      - name: Validate model performance
+        run: python -m scripts.validate_model
+
+      - name: Upload model for the image build
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-model
+          path: |
+            models/svd_model.pkl
+            models/metrics.json
+          retention-days: 7
+
+  # ===========================================================================
+  # Build and Push Docker Image to GHCR
   # ===========================================================================
   build-and-push:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
-    
+    needs: [verify]
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+      version: ${{ steps.meta.outputs.version }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
-      # TODO 3: Set up Docker Buildx
-      # - name: Set up Docker Buildx
-      #   uses: docker/setup-buildx-action@v3
-      
-      # TODO 4: Login to Docker Hub
-      # - name: Login to Docker Hub
-      #   uses: docker/login-action@v3
-      #   with:
-      #     username: ${{ secrets.DOCKER_USERNAME }}
-      #     password: ${{ secrets.DOCKER_PASSWORD }}
-      
-      # TODO 5: Build and push Docker image
-      # - name: Build and push
-      #   uses: docker/build-push-action@v5
-      #   with:
-      #     context: .
-      #     push: true
-      #     tags: |
-      #       ${{ secrets.DOCKER_USERNAME }}/movie-rating-api:latest
-      #       ${{ secrets.DOCKER_USERNAME }}/movie-rating-api:${{ github.ref_name }}
-      
-      # TODO 6: Create GitHub Release (BONUS)
-      # - name: Create Release
-      #   uses: softprops/action-gh-release@v1
-      #   with:
-      #     tag_name: ${{ github.ref_name }}
-      #     name: Release ${{ github.ref_name }}
-      #     body: |
-      #       Automated release for version ${{ github.ref_name }}
-      #     draft: false
-      #     prerelease: false
+
+      - name: Download validated model
+        uses: actions/download-artifact@v4
+        with:
+          name: release-model
+          path: models/
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # v1.2.3 -> 1.2.3, 1.2, latest (latest is skipped for pre-releases)
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - name: Build image for smoke test
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: movie-rating-api:candidate
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test candidate image
+        run: |
+          docker run -d -p 8000:8000 --name candidate movie-rating-api:candidate
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:8000/health | grep -q '"model_loaded":true' && break
+            sleep 2
+          done
+          curl -fsS http://localhost:8000/health | grep -q '"model_loaded":true'
+          curl -fsS -X POST http://localhost:8000/predict \
+            -H "Content-Type: application/json" \
+            -d '{"user_id": "196", "movie_id": "242"}'
+          docker rm -f candidate
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+
+      - name: Image summary
+        run: |
+          {
+            echo "### Published image"
+            echo ""
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo "digest: ${{ steps.push.outputs.digest }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # ===========================================================================
-  # TODO 7: Deploy to Staging (BONUS)
+  # Staging check: pull the published image by digest and smoke test it
   # ===========================================================================
-  # This job would deploy to a staging environment
-  # In a real scenario, this might deploy to AWS, GCP, Azure, etc.
-  
-  # deploy-staging:
-  #   name: Deploy to Staging
-  #   runs-on: ubuntu-latest
-  #   needs: [build-and-push]
-  #   environment: staging
-  #   
-  #   steps:
-  #     - name: Deploy to staging
-  #       run: |
-  #         echo "Deploying to staging environment..."
-  #         # Add deployment commands here
+  smoke-test-published:
+    name: Smoke Test Published Image
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    timeout-minutes: 10
+    permissions:
+      packages: read
+
+    steps:
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull and run the released image
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-and-push.outputs.digest }}
+        run: |
+          IMAGE=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
+          docker pull "$IMAGE"
+          docker run -d -p 8000:8000 --name released "$IMAGE"
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:8000/health | grep -q '"model_loaded":true' && break
+            sleep 2
+          done
+          curl -fsS http://localhost:8000/model/info
+          curl -fsS -X POST http://localhost:8000/predict/batch \
+            -H "Content-Type: application/json" \
+            -d '{"predictions": [{"user_id": "196", "movie_id": "242"}, {"user_id": "186", "movie_id": "302"}]}'
+          docker rm -f released
 
   # ===========================================================================
-  # TODO 8: Deploy to Production (BONUS)
+  # GitHub Release (uses the gh CLI and GITHUB_TOKEN, no third-party action)
   # ===========================================================================
-  # This job would deploy to production after staging approval
-  
-  # deploy-production:
-  #   name: Deploy to Production
-  #   runs-on: ubuntu-latest
-  #   needs: [deploy-staging]
-  #   environment: production
-  #   
-  #   steps:
-  #     - name: Deploy to production
-  #       run: |
-  #         echo "Deploying to production environment..."
-  #         # Add deployment commands here
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-and-push, smoke-test-published]
+    timeout-minutes: 5
+    permissions:
+      contents: write
+
+    steps:
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build-and-push.outputs.version }}
+          DIGEST: ${{ needs.build-and-push.outputs.digest }}
+        run: |
+          IMAGE=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
+          gh release create "$TAG" \
+            --repo "${{ github.repository }}" \
+            --title "Release $TAG" \
+            --generate-notes \
+            --notes "Docker image: \`$IMAGE:$VERSION\` (digest \`$DIGEST\`)"
