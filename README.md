@@ -1,221 +1,249 @@
 # Lab 3: Testing & CI/CD for ML Systems
 
-## Overview
+[![CI Pipeline](https://github.com/maxnguyen83/ddm501-lab3-testing-cicd/actions/workflows/ci.yml/badge.svg)](https://github.com/maxnguyen83/ddm501-lab3-testing-cicd/actions/workflows/ci.yml)
+[![Model Validation](https://github.com/maxnguyen83/ddm501-lab3-testing-cicd/actions/workflows/model-validation.yml/badge.svg)](https://github.com/maxnguyen83/ddm501-lab3-testing-cicd/actions/workflows/model-validation.yml)
+[![CD Pipeline](https://github.com/maxnguyen83/ddm501-lab3-testing-cicd/actions/workflows/cd.yml/badge.svg)](https://github.com/maxnguyen83/ddm501-lab3-testing-cicd/actions/workflows/cd.yml)
 
-Implement comprehensive testing strategies and CI/CD pipelines for the movie rating prediction system to ensure quality and automate deployment.
+Testing and CI/CD for a movie rating prediction API (FastAPI + Surprise SVD,
+MovieLens 100K). DDM501 - AI in Production, Lab 3.
 
-**Course:** DDM501 - AI in Production: From Models to Systems  
-**Weight:** 15% of total grade  
-**Duration:** 3 hours (in-class) + 1 week to complete  
-**Prerequisites:** Lab 1 and Lab 2 completed
+**What is in this repository**
 
-## Learning Objectives
-
-- Write comprehensive unit tests for ML components
-- Implement integration tests for API endpoints
-- Create data validation tests
-- Design model behavioral tests (invariance, directional, minimum functionality)
-- Set up CI/CD pipelines with GitHub Actions
-- Implement automated code quality checks
+| Deliverable | Where |
+|---|---|
+| Unit tests (model wrapper, schemas, config/singleton) | `tests/unit/` (80 tests) |
+| Integration tests (API, error handling, bounds) | `tests/integration/test_api.py` (53 tests) |
+| Data quality tests (sample + real MovieLens contract) | `tests/data/test_data_quality.py` (49 tests) |
+| Model behavioural tests (invariance, directional, MFT) | `tests/model/test_model_behavior.py` (31 tests) |
+| Coverage gate (>= 80%, currently 100% lines and branches) | `pyproject.toml`, `ci.yml` |
+| CI, CD and model validation workflows | `.github/workflows/` |
+| Pre-commit hooks and tool configuration | `.pre-commit-config.yaml`, `pyproject.toml`, `.flake8` |
+| Testing strategy, thresholds and bug findings | [`docs/TESTING_STRATEGY.md`](docs/TESTING_STRATEGY.md) |
 
 ## Project Structure
 
 ```
-ddm501-lab3-starter/
+.
 ├── app/
-│   ├── __init__.py
-│   ├── main.py             # FastAPI application
-│   ├── model.py            # ML model class
-│   ├── schemas.py          # Pydantic schemas
-│   └── config.py           # Configuration
-├── tests/
-│   ├── __init__.py
-│   ├── conftest.py         # Shared fixtures
-│   ├── unit/
-│   │   ├── __init__.py
-│   │   ├── test_model.py   # Model unit tests (TODO)
-│   │   └── test_schemas.py # Schema tests (TODO)
-│   ├── integration/
-│   │   ├── __init__.py
-│   │   └── test_api.py     # API tests (TODO)
-│   ├── data/
-│   │   ├── __init__.py
-│   │   └── test_data_quality.py  # Data tests (TODO)
-│   └── model/
-│       ├── __init__.py
-│       └── test_model_behavior.py  # Behavioral tests (TODO)
-├── .github/
-│   └── workflows/
-│       ├── ci.yml          # CI pipeline (TODO)
-│       └── cd.yml          # CD pipeline (TODO)
+│   ├── main.py             # FastAPI app (lifespan loads the model)
+│   ├── model.py            # Model wrapper: load, validate IDs, predict, clip
+│   ├── schemas.py          # Pydantic request/response schemas and input bounds
+│   └── config.py           # Settings from environment variables
 ├── scripts/
-│   └── train_model.py      # Model training script
-├── models/                 # Saved models
-├── .pre-commit-config.yaml # Pre-commit hooks (TODO)
-├── pyproject.toml          # Project configuration
-├── requirements.txt
-├── requirements-dev.txt    # Development dependencies
-├── Dockerfile
-└── README.md
+│   ├── train_model.py      # Train SVD, write models/svd_model.pkl + metrics.json
+│   └── validate_model.py   # CV threshold gate used by CI/CD
+├── tests/
+│   ├── conftest.py         # Shared fixtures (TestClient with lifespan, model, samples)
+│   ├── unit/               # test_model.py, test_schemas.py, test_utils.py
+│   ├── integration/        # test_api.py
+│   ├── data/               # test_data_quality.py
+│   └── model/              # test_model_behavior.py
+├── docs/TESTING_STRATEGY.md
+├── .github/workflows/      # ci.yml, cd.yml, model-validation.yml
+├── .pre-commit-config.yaml
+├── .flake8
+├── pyproject.toml          # black, isort, mypy, pytest, coverage settings
+├── requirements.txt / requirements-dev.txt
+└── Dockerfile / .dockerignore
 ```
 
 ## Quick Start
 
-### 1. Clone and Setup
-
 ```bash
-git clone https://github.com/[your-repo]/ddm501-lab3-starter.git
-cd ddm501-lab3-starter
+python3.12 -m venv .venv        # 3.10 also works (CI tests both)
+source .venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-
-# Install dependencies
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
+python scripts/train_model.py   # downloads MovieLens 100K once (~5 MB), ~10 s
+pytest tests/ --cov=app --cov-fail-under=80
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-### 2. Train Model (if not exists)
-
 ```bash
-python scripts/train_model.py
+curl -X POST localhost:8000/predict -H "Content-Type: application/json" \
+     -d '{"user_id": "196", "movie_id": "242"}'
+# {"user_id":"196","movie_id":"242","predicted_rating":3.58,"model_version":"1.0.0"}
 ```
 
-### 3. Run Tests
+Training is seeded (`random_state=42`), so every run produces the same model:
+5-fold CV RMSE 0.9350, MAE 0.7372 (BaselineOnly: 0.9436, global mean: 1.1257).
+
+## Running the Tests
 
 ```bash
-# Run all tests
-pytest tests/ -v
-
-# Run with coverage
-pytest tests/ -v --cov=app --cov-report=html
-
-# Run specific test category
-pytest tests/unit/ -v
+pytest tests/                    # everything (213 tests, ~2 s after training)
+pytest tests/unit/ -v            # one layer
 pytest tests/integration/ -v
-pytest tests/data/ -v
-pytest tests/model/ -v
+pytest tests/data/ -v            # needs MovieLens 100K (downloaded by training)
+pytest tests/model/ -v           # needs models/svd_model.pkl
+python -m scripts.validate_model # CV metric thresholds
 ```
 
-### 4. Code Quality Checks
+The integration and behaviour tests need a trained model, so run
+`scripts/train_model.py` first. CI does the same: the model file is gitignored
+and is trained inside the workflow.
+
+## Coverage
+
+Coverage is measured on `app/` with branch coverage on, and enforced twice:
+`--cov-fail-under=80` in CI and `fail_under = 80` in `pyproject.toml` (applies to
+any `pytest --cov` run).
 
 ```bash
-# Install pre-commit hooks
-pip install pre-commit
-pre-commit install
-
-# Run all checks manually
-pre-commit run --all-files
-
-# Individual tools
-black app/ tests/
-flake8 app/ tests/
-mypy app/
+pytest tests/ --cov=app --cov-report=term-missing --cov-report=html  # open htmlcov/index.html
 ```
 
-### 5. Run the API
+Latest local run (Python 3.12):
+
+```
+Name              Stmts   Miss Branch BrPart  Cover   Missing
+-------------------------------------------------------------
+app/__init__.py       1      0      0      0   100%
+app/config.py        13      0      0      0   100%
+app/main.py          57      0      4      0   100%
+app/model.py         51      0     10      0   100%
+app/schemas.py       34      0      2      0   100%
+-------------------------------------------------------------
+TOTAL               156      0     16      0   100%
+Required test coverage of 80% reached. Total coverage: 100.00%
+```
+
+![HTML coverage report](docs/screenshots/coverage-report.png)
+
+| Layer run alone | Coverage of `app/` |
+|---|---:|
+| Unit | 80% |
+| Integration | 87% |
+| Data | 55% |
+| Model behaviour | 66% |
+| All | 100% |
+
+In GitHub Actions each test job writes the coverage table to the **job summary**
+and uploads `coverage.xml`, the HTML report and JUnit XML as the
+`coverage-py3.10` / `coverage-py3.12` artifacts. We chose this over Codecov
+because Codecov needs a repository token (an extra secret to manage) and an
+external service; the job summary shows the same numbers on the run page.
+
+## CI/CD Pipelines
+
+### CI (`.github/workflows/ci.yml`) - every push to main/develop and every PR to main
+
+| Job | What it does |
+|---|---|
+| `lint` | flake8, black `--check`, isort `--check-only` (versions read from `requirements-dev.txt`) |
+| `type-check` | `mypy app/ scripts/` with the pydantic plugin and `disallow_untyped_defs` |
+| `test` | matrix Python 3.10 and 3.12: train model, run all tests with coverage >= 80%, publish coverage |
+| `docker` | build the image with the model the tests used, wait for the Docker health check to be `healthy`, call `/health` and `/predict` |
+
+Python 3.10 matches the production image; 3.12 is what the team develops on.
+pip downloads and the MovieLens files are cached between runs.
+
+### Model validation (`.github/workflows/model-validation.yml`)
+
+Runs when training code, model code, requirements or the data/model tests
+change, every Monday, and on demand:
+**data tests (before training) -> train -> CV thresholds -> behavioural tests.**
+The thresholds (RMSE <= 0.95, MAE <= 0.75, must beat a bias-only baseline) and
+the experiment behind them are in the testing strategy. An under-trained model
+(5 epochs, RMSE 0.958) fails this gate.
+
+### CD (`.github/workflows/cd.yml`) - on version tags `v*`
 
 ```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+git tag v1.0.0 && git push origin v1.0.0
 ```
 
-## TODO Tasks
+1. `verify`: tests + coverage gate + CV thresholds again on the tagged commit.
+2. `build-and-push`: build, smoke test the candidate image, then push to
+   `ghcr.io/maxnguyen83/ddm501-lab3-testing-cicd` with tags `1.0.0`, `1.0`,
+   `latest` and `sha-<commit>`.
+3. `smoke-test-published`: pull the image back by digest and test it.
+4. `release`: GitHub Release with generated notes and the image digest.
 
-Complete the following files:
+**Why GHCR instead of Docker Hub.** The workflow logs in with the built-in
+`GITHUB_TOKEN` (`packages: write` permission on that one job), so the pipeline
+works on a fresh fork with no repository secrets, and the image is linked to
+this repository. Docker Hub would need `DOCKER_USERNAME`/`DOCKER_PASSWORD`
+secrets created by hand. Docker Hub would be the better choice only if the image
+had to be public on Docker Hub specifically.
 
-### Test Files
-- [ ] `tests/unit/test_model.py` - Unit tests for model class
-- [ ] `tests/unit/test_schemas.py` - Schema validation tests
-- [ ] `tests/integration/test_api.py` - API endpoint tests
-- [ ] `tests/data/test_data_quality.py` - Data quality tests
-- [ ] `tests/model/test_model_behavior.py` - Behavioral tests
+**Rollback.** Every release is an immutable version tag; rolling back means
+deploying the previous tag (e.g. `ghcr.io/maxnguyen83/ddm501-lab3-testing-cicd:1.0.0`).
 
-### CI/CD Files
-- [ ] `.github/workflows/ci.yml` - CI pipeline
-- [ ] `.github/workflows/cd.yml` - CD pipeline (BONUS)
-- [ ] `.pre-commit-config.yaml` - Pre-commit hooks
-
-## Test Types
-
-### Unit Tests
-Test individual functions and classes in isolation.
-
-```python
-def test_model_loads_successfully(model):
-    assert model.is_loaded()
+```bash
+docker pull ghcr.io/maxnguyen83/ddm501-lab3-testing-cicd:latest
+docker run -p 8000:8000 ghcr.io/maxnguyen83/ddm501-lab3-testing-cicd:latest
 ```
 
-### Integration Tests
-Test component interactions and API endpoints.
+## Code Quality
 
-```python
-def test_predict_valid_request(test_client):
-    response = test_client.post("/predict", json={"user_id": "196", "movie_id": "242"})
-    assert response.status_code == 200
+```bash
+pre-commit install               # installs pre-commit and pre-push hooks
+pre-commit run --all-files       # whitespace/EOF/YAML/TOML, black, isort, flake8, mypy
+pre-commit run --all-files --hook-stage pre-push   # unit tests
 ```
 
-### Data Tests
-Validate data quality and schema.
+We kept the starter's black + isort + flake8 + mypy instead of switching to
+ruff. Ruff would replace three tools and run faster, but the course material and
+the starter configuration use these tools, and on this code base all four finish
+in a few seconds, so speed is not a problem. Hook versions match
+`requirements-dev.txt` so local hooks and CI give the same answer.
 
-```python
-def test_ratings_in_valid_range(sample_ratings):
-    for r in sample_ratings:
-        assert 1.0 <= r["rating"] <= 5.0
+## Docker
+
+```bash
+python scripts/train_model.py            # the image bakes in models/svd_model.pkl
+docker build -t movie-rating-api .
+docker run -p 8000:8000 movie-rating-api
 ```
 
-### Behavioral Tests
-Test model behavior patterns.
+The image runs as a non-root user. Its `HEALTHCHECK` uses Python (the slim base
+image has no `curl`) and requires `model_loaded == true`: `/health` answers
+200 even without a model, so a status-code-only check would call a broken
+container healthy. Checked locally: normal container `healthy` after about 9 s;
+same image with `MODEL_PATH` pointing to a missing file `unhealthy`.
 
-```python
-def test_same_input_same_output(model):
-    result1 = model.predict("196", "242")
-    result2 = model.predict("196", "242")
-    assert result1 == result2
-```
+## Design Decisions
 
-## CI/CD Pipeline
+- **Train in CI instead of committing the model.** `models/*.pkl` is
+  gitignored (4.9 MB, regenerated in ~10 s). Training in the workflow also tests
+  the training script itself. The CI docker job and CD reuse the exact model
+  that passed the tests (uploaded as an artifact) instead of training again.
+- **Seeded training.** Without seeds, every CI run trained a different model, so
+  behaviour thresholds could flip between runs. With `random_state=42` for SVD
+  and the CV folds, two runs give a byte-identical pickle.
+- **Unit tests with a stub algorithm.** The wrapper's rounding, clipping and ID
+  handling are tested against a pickled stub with a fixed estimate, so these
+  tests do not change when the model is retrained.
+- **Behaviour expectations from the model's trainset.** Directional tests derive
+  "loved vs hated movies" and "acclaimed vs panned movies" from the ratings
+  stored in the model, so they always match the artefact under test and need no
+  extra download.
+- **`scikit-surprise` 1.1.3 -> 1.1.5.** 1.1.3 is source-only: it cannot be
+  installed with current pip/setuptools (isolated build without pip, runtime
+  import of the removed `pkg_resources`) and fails in `python:3.10-slim`
+  (no `gcc`). 1.1.5 ships wheels for Python 3.10-3.14 and works with the pinned
+  numpy 1.26.2. All other pins are unchanged.
 
-### Continuous Integration
-- Runs on every push and pull request
-- Executes linting, type checking, and tests
-- Reports code coverage
+## Bugs found by the tests
 
-### Continuous Deployment (BONUS)
-- Triggered on version tags
-- Builds and pushes Docker image
-- Deploys to staging/production
+The tests found and we fixed: the starter test client never loaded the model
+(every prediction 503), batch requests skipped the whitespace check and
+stripping (a padded user ID got the cold-start rating), the model wrapper
+silently cold-started `None`/int IDs, 500 responses leaked exception text, the
+training script crashed without a terminal, unseeded training, an image that
+could not build, a health check that could never pass, and a `.gitignore` rule
+(`data/`) that kept `tests/data/` out of the repository. Details and evidence:
+[`docs/TESTING_STRATEGY.md` section 5](docs/TESTING_STRATEGY.md#5-findings-bugs-the-tests-uncovered).
 
-## Grading Rubric
+## Team
 
-| Criteria | Weight |
-|----------|--------|
-| Test Coverage (unit, integration, data, model) | 30% |
-| CI/CD Pipeline | 30% |
-| Code Quality | 20% |
-| Documentation | 20% |
-
-**Minimum Requirements:**
-- 80% code coverage
-- All CI checks passing
-- Pre-commit hooks configured
-
-## Resources
-
-- [pytest Documentation](https://docs.pytest.org/)
-- [GitHub Actions](https://docs.github.com/en/actions)
-- [pre-commit](https://pre-commit.com/)
-- [Black](https://black.readthedocs.io/)
-- [Flake8](https://flake8.pycqa.org/)
-- [mypy](https://mypy.readthedocs.io/)
-
-## Submission
-
-1. Complete all TODO items
-2. Ensure all tests pass
-3. Achieve minimum 80% coverage
-4. Push to GitHub with CI badge
-5. Submit repository link via LMS
+| Member | Responsibility |
+|---|---|
+| maxnguyen83 | CI, CD and model-validation workflows, pre-commit, tool configuration, training/validation scripts, Docker |
+| Ducmanh2212 | Unit tests (`tests/unit/`) and shared fixtures (`tests/conftest.py`) |
+| hieunt-fsb-ai | Integration and data quality tests, fixes in `app/` |
+| thientd2609 | Model behavioural tests, testing strategy, README |
 
 ## License
 
